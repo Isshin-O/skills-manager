@@ -1,0 +1,43 @@
+# Fork only, run by hand after installing and testing a Fork Build prerelease.
+# Marks it Latest; the app's updater and its "new version" check only follow
+# Latest, so this is the one switch that ships an update.
+name: Fork Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Prerelease tag to promote (empty: the newest prerelease)'
+        required: false
+
+concurrency:
+  group: fork-promote
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    if: github.repository != 'xingkongliang/skills-manager'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Mark the prerelease Latest
+        run: |
+          set -euo pipefail
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+              --json tagName,isPrerelease,createdAt \
+              --jq '[.[] | select(.isPrerelease)] | sort_by(.createdAt) | last | .tagName // empty')
+          fi
+          if [ -z "$TAG" ]; then
+            echo "No prerelease to promote." >&2
+            exit 1
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' |
+            grep -qx latest.json || { echo "$TAG has no latest.json" >&2; exit 1; }
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest
+          echo "Promoted $TAG."

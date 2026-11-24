@@ -1,0 +1,49 @@
+# Fork only: rebase our commits onto upstream main every week. The push starts
+# Fork Build, which publishes a prerelease. Nothing reaches the installed app
+# until Fork Promote is run by hand. On a conflict this fails, and the weekly
+# Claude Code routine (fork-guide.md) resolves it a few hours later.
+#
+# Needs secret SYNC_TOKEN: a fine-grained PAT for this repository with
+# Contents: write and Workflows: write. GITHUB_TOKEN cannot push commits that
+# touch .github/workflows, and its pushes would not start Fork Build.
+name: Fork Sync
+
+on:
+  schedule:
+    # Monday 03:37 Asia/Shanghai; GitHub delays or drops schedules at the top of the hour.
+    - cron: '37 19 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: fork-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    if: github.repository != 'xingkongliang/skills-manager'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN }}
+
+      - name: Rebase onto upstream main
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add upstream https://github.com/xingkongliang/skills-manager.git
+          git fetch --no-tags upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already based on upstream $(git rev-parse --short upstream/main)."
+            exit 0
+          fi
+          # A conflict fails this step; GitHub then emails the failure, and
+          # the weekly routine rebases and force-pushes main itself.
+          git rebase upstream/main
+          git push --force-with-lease=main origin HEAD:main
+

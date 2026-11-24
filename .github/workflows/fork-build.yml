@@ -1,0 +1,109 @@
+# Fork only: the Windows leg of release.yml, published as a prerelease named
+# v<version>-fork.<run>. The installed app only follows the release marked
+# Latest, so testing this build changes nothing until Fork Promote is run.
+#
+# The version is stamped here and never committed. `-fork.<run>` is a SemVer
+# prerelease, so builds order by run number, and any upstream release of the
+# same base version counts as newer. Cargo.toml must match tauri.conf.json:
+# the app only publishes its CLI bridge when `skills-manager-cli --version`
+# equals the app version.
+#
+# Needs secrets TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+# from `tauri signer generate`; the matching public key is in tauri.conf.json.
+name: Fork Build
+
+on:
+  # Fork Sync, the conflict routine and local pushes all land on main.
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: fork-build
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.repository != 'xingkongliang/skills-manager'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: src-tauri
+          # Same as release.yml: the Windows cache save fails intermittently.
+          save-if: false
+
+      - run: npm ci
+
+      - name: Stamp fork version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=$(node -p "require('./package.json').version")
+          version="${base}-fork.${GITHUB_RUN_NUMBER}"
+          npm pkg set version="$version"
+          node -e '
+            const fs = require("fs"), f = "src-tauri/tauri.conf.json";
+            const c = JSON.parse(fs.readFileSync(f, "utf8"));
+            c.version = process.argv[1];
+            fs.writeFileSync(f, JSON.stringify(c, null, 2) + "\n");
+          ' "$version"
+          sed -i "0,/^version = \".*\"/s//version = \"$version\"/" src-tauri/Cargo.toml
+          grep -m1 '^version = ' src-tauri/Cargo.toml | grep -qF "\"$version\""
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha8=${GITHUB_SHA:0:8}" >> "$GITHUB_OUTPUT"
+
+      - name: Drop older untested builds
+        shell: bash
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+            --json tagName,isPrerelease --jq '.[] | select(.isPrerelease) | .tagName' |
+          while read -r tag; do
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          done
+
+      - name: Build with Tauri
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v${{ steps.version.outputs.version }}
+          releaseName: 'Skills Manager v${{ steps.version.outputs.version }} (${{ steps.version.outputs.sha8 }})'
+          releaseBody: 'Fork build of ${{ github.sha }}. Untested until promoted: run Fork Promote to make it Latest.'
+          releaseCommitish: ${{ github.sha }}
+          releaseDraft: false
+          prerelease: true
+          args: --target x86_64-pc-windows-msvc --bundles nsis
+
+      - name: Verify updater metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v${{ steps.version.outputs.version }}"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP"
+          jq -e '.platforms["windows-x86_64"].signature and .platforms["windows-x86_64"].url' \
+            "$RUNNER_TEMP/latest.json" >/dev/null || {
+            echo "latest.json has no signed windows-x86_64 entry" >&2
+            cat "$RUNNER_TEMP/latest.json" >&2
+            exit 1
+          }

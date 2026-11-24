@@ -31,9 +31,9 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBRUYwMTBDOEQ3MDdEODAKUldTQWZYQ05EQUh2Mm0wNDZtNm5VYWJpbjRaZVJQRUhrQ2tkOXc3MHBWZ2VaREo0OVd3WEU3d0oK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQwRUZDODkxQkU3MDNFMTIKUldRU1BuQytrY2p2UUlZNU5lT21DQUR5TkxjSEp0ajVqUDJDN29JZXc1aU1NMXh1b05QREZ5eHMK",
       "endpoints": [
-        "https://github.com/xingkongliang/skills-manager/releases/latest/download/latest.json"
+        "https://github.com/Isshin-O/skills-manager/releases/latest/download/latest.json"
       ]
     }
   },
