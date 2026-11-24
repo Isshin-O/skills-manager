@@ -38,3 +38,11 @@ CLAUDE.md
 AGENTS.md
 .loop-log
 
+# local working files (personal fork)
+/fork-guide.md
+/.codebase-memory/
+/task_plan.md
+/progress.md
+/findings.md
+/feature-request.md
+/skill_report.py
